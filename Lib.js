@@ -1,0 +1,724 @@
+/**
+ * Map (dictionary) class for unique Key-Value storage. 
+ * @class
+ */
+class KeyValueMap {  
+  constructor() {
+    this.map = {};
+  }
+
+  /**
+   * Method to check if the map is empty
+   * @returns {bool}
+   */
+  isEmpty() {
+    return Object.keys(this.map).length === 0;
+  }
+
+  /**
+   * Method to add key-value pair to the map
+   * @param {any} key - Unique key to be stored in the map
+   * @param {any} value - the value corresponding to the key to be stored in the map
+   */
+  put(key, value) {
+    this.map[key] = value;
+  }
+
+  /**
+   * Method to get value by key
+   * @param {any} key - Unique key that identifies the value in the map
+   * @returns {any}
+   */
+  get(key) {
+    return this.map[key];
+  }
+
+  /**
+   * Method to check if map contains key
+   * @param {any} key - key to search in the map
+   * @returns {bool}
+   */
+  contains(key) {
+    return key in this.map;
+  }
+
+  /**
+   * Method to get all keys in the map
+   * @returns {any[]}
+   */
+  getKeys() {
+    return Object.keys(this.map);
+  }
+
+  /**
+   * Method to get all values in the map
+   * @returns {any[]}
+   */
+  getValues() {
+    return Object.values(this.map);
+  }
+
+  /**
+   * Method to remove key-value pair from the map
+   * @param {any} key - key to be deleted from the map     
+   */
+  remove(key) {
+    delete this.map[key];
+  }
+
+  /**
+   * Method to clear the map
+   */
+  clear() {
+    this.map = {};
+  }
+}
+
+/**
+ * Singleton class to hold default property values. Hides a KeyValuePair.
+ * @class
+ */
+class PropertyManager {    
+  constructor() {
+    if (!this.instance) {
+      let propKeyValues = new KeyValueMap();
+
+      /**
+       * Method to setup default property values.
+       * @returns {KeyValueMap}
+       */
+      this.setUp = function() {    
+        if (propKeyValues.isEmpty()) {
+          propKeyValues.put('StdUrlFormat', /^(https?:\/\/|ftp:\/\/|mailto:)?(www\.)?([a-z0-9]+([\-\.]{1}[a-z0-9]+)*|localhost)(:[0-9]{1,5})?(\/.*)?$/i);    
+          propKeyValues.put('GDriveStdUrlFormat', /(?:drive\.google\.com\/(?:file\/d\/|open\?id=|folderview\?id=|drive\/folders\/)|docs\.google\.com\/(?:document\/d\/|presentation\/d\/|spreadsheets\/d\/))([a-zA-Z0-9_-]+)/);
+          propKeyValues.put('GDriveFileUrlFormat', /drive\.google\.com\/(?:file\/d\/|folderview\?id=|drive\/folders\/)([a-zA-Z0-9_-]+)/);          
+          propKeyValues.put('GDriveDLUrlFormat', /drive\.google\.com\/uc\?export=download&id=([a-zA-Z0-9_-]+)/);
+          propKeyValues.put('GDriveDLUrlParametric', 'https://drive.google.com/uc?export=download&id={{id}}');
+          propKeyValues.put('DefaultSheetNames', { mainDataSheetName: 'Raw Data', configSheetName: 'Config', logSheetName: 'Log' });
+          propKeyValues.put('SupportedMimeTypes', 'BMP,GIF,JPEG,JPG,PNG,SVG,PDF,PLAIN,HTML,OFFICEDOCUMENT');
+          propKeyValues.put('UsualCurrencyTokens', ',;₹;$;RS.;RS;INR.;INR;USD.;USD;RUPEES;RUPEE;(;)');
+          propKeyValues.put('JsonDisruptorTokens', '```,\n,\r');
+          propKeyValues.put('DefaultTextGPTModel', 'gpt-3.5-turbo-0125');
+          propKeyValues.put('DefaultImageGPTModel', 'dall-e-3');
+        }
+        return propKeyValues;
+      }
+
+      this.instance = this;
+    }
+    return this.instance;
+  }
+}
+
+/**
+ * Utility class for various useful static functions
+ * @class
+ */
+class Utils {
+  /**
+   * Method to ensure default properties are setup
+   * @returns {KeyValueMap}
+   */
+  static ensureProperties() {
+    return (new PropertyManager()).setUp();
+  }
+
+  /**
+   * Method to extract the google drive file id from a url
+   * @param {string} url - Check if the url format corresponds to a valid google drive shareable url
+   * @returns {string} google drive file or folder id form the url
+   */
+  static getIdFromGDriveUrl(url) {
+    Logger.log(`Called Utils.getIdFromGDriveUrl('${url}')`);
+    let regex = Utils.ensureProperties().get('GDriveStdUrlFormat');
+    let matches = regex.exec(url);
+    if (!matches) {
+      regex = Utils.ensureProperties().get('GDriveFileUrlFormat');
+      matches = regex.exec(url);
+    }
+    if (!matches) {
+      regex = Utils.ensureProperties().get('GDriveDLUrlFormat');
+      matches = regex.exec(url);
+    }
+    if (!matches) {
+      Logger.log(`Given url '${url}' does not point to a valid File or a Folder Id on Google Drive.`);
+    }
+    return matches ? matches[1] : null;
+  }
+
+  /**
+   * Method to fetch a google drive url from file id
+   * @param {string} id - google drive file id
+   * @param {bool} downloadable - (optional) is url required to be downloadable? Default set to false.
+   * @returns {string} google drive url from the file id
+   */
+  static getGDriveUrlFromId(id, downloadable = false) {
+    Logger.log(`Called Utils.getGDriveUrlFromId('${id}')`);    
+
+    try {      
+      let file = DriveApp.getFileById(fileId);
+      
+      //Only files are downloadable 
+      if (downloadable) {
+        return Utils.ensureProperties().get('GDriveDLUrlParametric').replaceAll('{{id}}', fileId);
+      }
+
+      let url = file.getUrl();
+      return url;
+    } 
+    catch (e) {
+      // If getFileById fails, try getFolderById
+      try {
+        let folder = DriveApp.getFolderById(fileId);
+        let url = folder.getUrl();
+        return url;
+      }
+      catch (err) {
+        Logger.log(`Given id '${id}' does not point to a valid accessible File or a Folder on Google Drive.`);
+        return null;
+      }
+    }
+  }
+
+  /**
+   * Method to check if the input text is of a standard url format
+   * @param {string} text - input string
+   * @returns {bool}
+   */
+  static isUrl(text) {
+    Logger.log(`Called Utils.isUrl('${text}')`);
+    let urlRegex = Utils.ensureProperties().get('StdUrlFormat');
+    return urlRegex.test(text);
+  }
+
+  /**
+   * Method to convert a free text representing an amount to its rounded numeric equivalent
+   * @param {string} value - free text with amount formats such as '1,20,000', '(₹ 33,000)' etc. 
+   * @param {number} fixed - decimal precision in number of places after decimal
+   * @returns {number}
+   */
+  static amountToNumber(value, fixed = 0) {
+    (Utils.ensureProperties().get('UsualCurrencyTokens').split(';')).forEach(s => {
+      value = value.toString().toUpperCase().replaceAll(s, ``);
+    });
+    return fixed === 0 ? Math.round(parseFloat(value)) : Number(parseFloat(value).toFixed(fixed));
+  }
+
+  /**
+   * Method to convert numeric values to equivalent currency amount representations e.g. '$ 120,000', '(₹ 33,000)' etc. 
+   * @param {number} value - amount in number
+   * @param {string} currencySymbol - symbol of currency, default is '₹'. Input null to skip currency representation.
+   * @param {string} locale - locale for amount format, default is 'en-IN'
+   * @returns {string}
+   */
+  static numberToAmount(value, currencySymbol = '₹', locale = 'en-IN') {      
+    return `${currencySymbol ? `${currencySymbol} ` : `` }${value.toLocaleString(locale)}`;
+  }
+
+  /**
+   * Method to fetch number of days between start and end dates
+   * @param {date} fromDate - from date of the period
+   * @param {date} toDate - (optional) to date of the period, default set to today's date. 
+   * @returns {number}
+   */
+  static daysBetweenDates(fromDate, toDate = new Date()) {
+    // Calculate the difference in milliseconds
+    var difference = toDate.getTime() - fromDate.getTime();
+    
+    // Convert milliseconds to days
+    var days = difference / (1000 * 3600 * 24);
+    
+    // Return the absolute value of days to avoid negative values for reverse dates
+    return Math.abs(days);
+  }
+
+  /**
+   * Method to remove characters that disrupt json parsing.
+   * @param {string} text - json text
+   * @returns {string}
+   */
+  static fixJsonDisruptors(text) {
+    Utils.ensureProperties().get('JsonDisruptorTokens').split(',').forEach(tk => { text = text.replaceAll(tk, " ") });
+
+    var fixedText = text.replace(/"([^"]+)"/g, function(match, p1) {
+      // Escape double quotes inside the string values
+      return '"' + p1.replace(/"/g, '\\"') + '"';
+    });
+
+    return fixedText;
+  }
+
+  /**
+   * Method to convert a google document to a PDF file
+   * @param {string} docId - file id the input google document
+   * @returns {File}
+   */
+  static convertDocToPdf(docId) {
+    var doc = DriveApp.getFileById(docId);
+    var pdf = doc.getAs('application/pdf');    
+    var pdfName = doc.getName() + '.pdf';
+    return DriveApp.createFile(pdf).setName(pdfName);
+  }
+
+  /**
+   * Method to convert a PDF file to a google document
+   * @param {string} fileId - file id the input pdf
+   * @param {bool} useOcr - (optional) use the inbuilt google ocr functionality. Default set to false.
+   * @returns {File}
+   */
+  static extractDoc(fileId, useOcr = false) {    
+    let file = DriveApp.getFileById(fileId);
+    let blob = file.getBlob();
+    let contentMimeType = blob.getContentType();
+    let allowableMimeType = this.checkForMimeTypes(contentMimeType);
+    let text = ``;
+    if (allowableMimeType === `PLAIN` || allowableMimeType === `HTML`) {
+      text = blob.getDataAsString();
+    }
+    else if (allowableMimeType !== `NONE`) {
+      let resource = {title: blob.getName(), mimeType: contentMimeType};
+      let docFile = Drive.Files.insert(resource, blob, useOcr ? {ocr: true, ocrLanguage: "en"} : {convert: true});
+      return docFile;
+    } 
+    else {
+      try {
+        text = blob.getDataAsString();
+      }
+      catch(e) {
+        text = ``;
+      }
+    }
+
+    let docTextFile = DocumentApp.create(file.getName());
+    DriveApp.getFileById(docTextFile.getId()).setContent(text);
+    return docTextFile;
+  }
+
+  /**
+   * Method to convert a PDF file to a free text
+   * @param {string} fileId - file id the input pdf
+   * @param {bool} useOcr - (optional) use the inbuilt google ocr functionality. Default set to false.
+   * @returns {string}
+   */
+  static extractText(fileId, useOcr = false) {
+    let blob = DriveApp.getFileById(fileId).getBlob();
+    let contentMimeType = blob.getContentType();
+    let allowableMimeType = this.checkForMimeTypes(contentMimeType);
+    let text = ``;
+    if (allowableMimeType === `PLAIN` || allowableMimeType === `HTML`) {
+      text = blob.getDataAsString();
+    }
+    else if (allowableMimeType !== `NONE`) {
+      let resource = {title: blob.getName(), mimeType: contentMimeType};
+      let docFile = Drive.Files.insert(resource, blob, useOcr ? {ocr: true, ocrLanguage: "en"} : {convert: true});
+      
+      // Open the converted Google Document
+      let doc = DocumentApp.openById(docFile.id);
+      let body = doc.getBody();
+      text = body.getText();
+      
+      // Clean up: Delete the temporary Google Document
+      DriveApp.getFileById(docFile.id).setTrashed(true);
+    } 
+    else {
+      try {
+        text = blob.getDataAsString();
+      }
+      catch(e) {
+        text = ``;
+      }
+    } 
+    return text;
+  }
+
+  /**
+   * Method to return default mime type matching the file level mimetype.
+   * @param {string} fileMimeType - file's mime type
+   * @returns {string}
+   */
+  static checkForMimeTypes(fileMimeType) {
+    let arrMimeTypes = Utils.ensureProperties().get('SupportedMimeTypes').split(`,`);  
+    for(let i = 0; i < arrMimeTypes.length; i++) {
+      if (fileMimeType.toUpperCase().indexOf(arrMimeTypes[i]) > -1) {
+        return arrMimeTypes[i];
+      }
+    }
+    return `NONE`;
+  }
+
+  /**
+   * Method to make a synchronous HTTP request to a url endpoint and fetch the response object
+   * @param {string} url - valid url enpoint
+   * @param {obj} options - (optional) json object with http option object (incl. method, header and payload), default is null.
+   * @returns {obj}
+   */
+  static makeHttpCall(url, options = null) {
+    let response = options ? UrlFetchApp.fetch(url, options) : UrlFetchApp.fetch(url);
+    let responseText = response.getContentText();
+    let result = {}
+    try {
+      result = JSON.parse(responseText);
+    }
+    catch(err) {
+      result["responseText"] = responseText;
+    }
+    return result;
+  }
+
+  /**
+   * Method to call a google's nlp endpoint and fetch the response object
+   * @param {string} apiKey - valid google's nlp api key
+   * @param {string} apiEndPoint - valid google nlp endpoint 
+   * @param {string} text - json string of the core request
+   * @returns {obj}
+   */
+  static callGoogleNLP(apiKey, apiEndpoint, text) {
+    // Construct the request payload
+    let payload = {
+      document: {
+        type: 'PLAIN_TEXT',
+        content: text
+      },
+      encodingType: 'UTF8'
+    };
+    
+    // Set the request options
+    let options = {
+      method: 'post',
+      contentType: 'application/json',
+      "headers": {
+        "Authorization": "Basic " + apiKey
+      },
+      payload: JSON.stringify(payload),
+    };
+    
+    // Make the API request    
+    let jsonResponse = this.makeHttpCall(apiEndpoint, options);
+    
+    Logger.log(responseText);
+    
+    // Optionally, process the response data as needed
+    return jsonResponse;
+  }
+
+  /**
+   * Method to call a openai's image endpoint and fetch the response object
+   * @param {string} apiKey - valid openai's gpt image api key
+   * @param {string} apiEndPoint - valid openai's gpt image endpoint 
+   * @param {string} prompt - valid prompt to generate the image
+   * @param {string} modelname - (optional) modelname to be used for image generation. Default value set to 'dall-e'.
+   * @returns {obj}
+   */
+  static callOpenAIForImage(apiKey, apiEndpoint, prompt, modelName = Utils.ensureProperties().get('DefaultImageGPTModel')) {
+    let payload = {
+      "model": modelName,
+      "prompt": prompt
+    };
+
+    let options = {
+      "method": "post",
+      "contentType": "application/json",
+      "payload": JSON.stringify(payload),
+      "headers": {
+        "Authorization": "Bearer " + apiKey
+      },
+      "muteHttpExceptions": true
+    };
+    
+    let result = this.makeHttpCall(apiEndpoint, options);
+    
+    if (result.error) {
+      Logger.log("Error from OpenAI: " + result.error.message);
+      return null;
+    } else {
+      Logger.log("Response from OpenAI: " + JSON.stringify(result.data[0]));
+      return result.data[0];
+    }
+  }
+
+  /**
+   * Method to call a openai's gpt chat endpoint and fetch the response object
+   * @param {string} apiKey - valid openai's gpt chat api key
+   * @param {string} apiEndPoint - valid openai's gpt chat endpoint
+   * @param {string} prompt - valid prompt to generate the response
+   * @param {string} modelname - (optional) modelname to use for chat generation. Default value set to 'gpt3.5-turbo'.
+   * @param {string[]} conversations - (optional) previous conversation messages (if any). Default set to an empty array.
+   * @returns {obj}
+   */
+  static callOpenAIWithText(apiKey, apiEndpoint, message, modelName = Utils.ensureProperties().get('DefaultTextGPTModel'), conversations = []) {
+    let payload = {
+      "model": modelName,
+      "messages": []
+    };
+    
+    conversations.forEach(msg => {
+      payload.messages.push({"role": "system", "content": msg})
+    });
+
+    payload.messages.push({"role": "user", "content": message})
+    
+    let options = {
+      "method": "post",
+      "contentType": "application/json",
+      "payload": JSON.stringify(payload),
+      "headers": {
+        "Authorization": "Bearer " + apiKey
+      },
+      "muteHttpExceptions": true
+    };
+        
+    let result = this.makeHttpCall(apiEndpoint, options);
+    
+    if (result.error) {
+      Logger.log("Error from OpenAI: " + result.error.message);
+      return null;
+    } else {
+      Logger.log("Response from OpenAI: " + result.choices[0].message.content);
+      return result.choices[0].message.content;
+    }
+  }
+}
+
+/**
+ * Provider class for google spreadsheet's internal data management
+ * @class
+ */  
+class SpreadsheetDataProvider {
+  /**
+   * Create a provider object for the google spreadsheet
+   * @constructor
+   * @param {string} idOrUrl - google drive file id or the url of the spreadsheet file
+   */
+  constructor(idOrUrl) {
+    let sheetUrl = null, sheetId = null;
+
+    if (Utils.isUrl(idOrUrl)) {
+      sheetUrl = idOrUrl;
+      sheetId = Utils.getIdFromGDriveUrl(idOrUrl);
+    }
+    else {
+      sheetId = idOrUrl;
+      sheetUrl = Utils.getGDriveUrlFromId(sheetId);
+    }
+
+    /**
+     * Method to fetch file id of the spreadsheet
+     * @returns {string}
+     */
+    this.getId = function() {
+      return sheetId; 
+    };
+
+    /**
+     * Method to fetch google drive url of the spreadsheet
+     * @returns {string}
+     */
+    this.getUrl = function() {
+      return sheetUrl;
+    };
+
+    let spreadSheet = SpreadsheetApp.openById(sheetId);
+
+    /**
+     * Method to fetch the spreadsheet object
+     * @returns {Spreadsheet}
+     */
+    this.getSpreadsheet = function() {
+      return spreadSheet;
+    };
+
+    let dataSheetMap = new KeyValueMap();
+
+    /**
+     * Method to populate and return all data sheets as a map object from current spreadsheet
+     * @returns {KeyValueMap}
+     */
+    this.loadDataSheets = function() {
+      let sheetsArr = spreadSheet.getSheets();
+      sheetsArr.forEach(s => {
+        dataSheetMap.put(s.getName(), s);
+      });
+      return dataSheetMap;
+    };
+
+    let config = new KeyValueMap();
+
+    /**
+     * Method to populate and return config dictionary data from underlying config data sheet
+     * @param {string} sheetName - (optional) sheet's name where column header is located, default set to 'Config'
+     * @returns {KeyValueMap}
+     */
+    this.getConfig = function(sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).configSheetName) {
+      if (config.isEmpty()) {
+        let configSheet = dataSheetMap.get(sheetName);
+        const populatedRows = configSheet.getRange(`A2:B`).getValues().filter(row => row.some(cell => cell !== ''));      
+        for(let i = 0; i < populatedRows.length; i++) {
+          config.put(populatedRows[i][0], populatedRows[i][1]);
+        }
+      }
+      return config;
+    }
+
+    /**
+     * Method to update the config dictionary data and corresponding sheet
+     * @param {any} key - key to search
+     * @param {any} value - value to update for that key
+     * @param {bool} syncData - (optional) synchronize the data between dictionary snd sheet, default to 
+     * @param {string} sheetName - (optional) sheet's name where column header is located, default set to 'Config'
+     */
+    this.updateConfig = function(key, value, syncData = true, sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).configSheetName) {
+      config.put(key, value)
+      if (syncData) {
+        let configSheet = dataSheetMap.get(sheetName);
+        var foundRange = configSheet.getRange(1, 1, configSheet.getLastRow(), 1).createTextFinder(key).matchCase(false).findAll();
+        foundRange.forEach(r => {
+          var row = r.getRow();
+          configSheet.getRange(row, 2).setValue(value);
+        });
+      }
+    }
+
+    /**
+     * Method to get log sheet object
+     * @param {string} sheetName - (optional) main data sheet's name, default set to 'Log'
+     * @returns {sheet}
+     */
+    this.getLogSheet = function(sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).logSheetName) {
+      return this.getDataSheet(sheetName);
+    } 
+
+    /**
+     * Method to get main data sheet object
+     * @param {string} sheetName - (optional) main data sheet's name, default set to 'Raw Data'
+     * @returns {sheet}
+     */
+    this.getDataSheet = function(sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).mainDataSheetName) {
+      return dataSheetMap.get(sheetName);
+    }
+
+    /**
+     * Method to append flat array of data matching to the row's column structure
+     * @param {any[]} logDataArr - array of data
+     * @param {string} sheetName - (optional) sheet's name where column header is located, default set to 'Log'
+     * @returns {range}
+     */
+    this.Log = function(logDataArr, sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).logSheetName) {
+      return this.appendRow(logDataArr, sheetName);
+    }
+
+    /**
+     * Method to find an array of rows that contain the given text
+     * @param {string} searchText - value to find
+     * @param {number} row - (optional) cell row index. Default set to first row.
+     * @param {number} column - (optional) cell column index. Default set to first column.
+     * @param {string} sheetName - (optional) sheet's name where column header is located, default set to 'Raw Data'
+     * @returns {array}
+     */
+    this.findRowsByText = function(searchText, row = 1, column = 1, sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).mainDataSheetName) {
+      let sheet = dataSheetMap.get(sheetName);
+      let foundCells = this.findCellsByText(searchText, row, column, sheetName);
+      let foundRows = new KeyValueMap();
+      foundCells.forEach(cell => {
+        let rowIndex = cell.getRow();
+        if (!foundRows.contains(rowIndex)) {
+          foundRows.put(rowIndex, sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()));
+        }
+      })
+      return foundRows.getValues();
+    }
+
+    /**
+     * Method to find cells that contain the given text
+     * @param {string} searchText - value to find
+     * @param {number} row - (optional) cell row index. Default set to first row.
+     * @param {number} column - (optional) cell column index. Default set to first column.
+     * @param {string} sheetName - (optional) sheet's name where column header is located, default set to 'Raw Data'
+     * @returns {range}
+     */
+    this.findCellsByText = function(searchText, row = 1, column = 1, sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).mainDataSheetName) {
+      let sheet = dataSheetMap.get(sheetName);
+      let foundCells = sheet.getRange(row, column, sheet.getLastRow(), sheet.getLastColumn()).createTextFinder(searchText).matchCase(false).findAll(); //To exclude headers from search you should supply row = 2.
+      return foundCells;
+    }
+
+    /**
+     * Method to update array of values in a given row of the sheet
+     * @param {any[]} dataArr - array of values
+     * @param {number} row - (optional) cell row index. Default set to first row
+     * @param {string} sheetName - (optional) sheet's name where column header is located, default set to 'Raw Data'
+     * @returns {range}
+     */
+    this.updateRow = function(dataArr, row = 1, sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).mainDataSheetName, delayFlush = false) {
+      let sheet = dataSheetMap.get(sheetName);
+      let numCols = sheet.getLastColumn();
+      let rowRange = sheet.getRange(row, 1, 1, numCols);
+      let result = rowRange.setValues([dataArr]);
+      if (!delayFlush) SpreadsheetApp.flush();
+      return result;
+    }
+
+    /**
+     * Method to update value of a cell at a given row and column
+     * @param {any} value - value to update
+     * @param {number} row - (optional) cell row index. Default set to first row
+     * @param {number} column - (optional) cell column index. Default set to first column
+     * @param {string} sheetName - (optional) sheet's name where column header is located, default set to 'Raw Data'
+     * @returns {range}
+     */
+    this.updateCell = function(value, row = 1, column = 1, sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).mainDataSheetName, delayFlush = false) {
+      let sheet = dataSheetMap.get(sheetName);
+      let result = sheet.getRange(row, column, 1, 1).setValue(value);
+      if (!delayFlush) SpreadsheetApp.flush();
+      return result;
+    }
+
+    /**
+     * Method to append flat array of data matching to the row's column structure
+     * @param {any[]} dataArr - array of data
+     * @param {string} sheetName - (optional) sheet's name where column header is located, default set to 'Raw Data'
+     * @returns {range}
+     */
+    this.appendRow = function(dataArr, sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).mainDataSheetName) {
+      let sheet = dataSheetMap.get(sheetName);
+      return sheet.appendRow(dataArr);
+    }
+
+    /**
+     * Method to return column index (0-based) depending on the column name
+     * @param {string} columnName - column header to search
+     * @param {string} sheetName - (optional) sheet's name where column header is located, default set to 'Raw Data'
+     * @returns {number}
+     */
+    this.getColumnIndexByName = function(columnName, sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).mainDataSheetName) {
+      let sheet = dataSheetMap.get(sheetName);
+      let range = sheet.getRange(1, 1, 1, sheet.getLastColumn()).createTextFinder(columnName).matchCase(false).findAll();
+      if (range.length === 1) {
+        return range[0].getColumn() - 1; //Javascript Array Index = (Sheet's Column Offset - 1)
+      }
+      return 0;
+    }
+
+    /**
+     * Method to return column name based on array index of column header
+     * @param {number} index - index (0-based) of the column
+     * @param {string} sheetName - (optional) sheet's name where column header is located, default set to 'Raw Data'
+     * @returns {string}
+     */
+    this.getColumnNameByIndex = function(index, sheetName = Utils.ensureProperties().get(`DefaultSheetNames`).mainDataSheetName) {
+      let sheet = dataSheetMap.get(sheetName);
+      let range = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues();      
+      return range[0][index]; //Javascript Array Index (not Sheet's Column Offset i.e. Index + 1)
+    }
+
+    this.loadDataSheets();
+  }
+}
+
+function refer(self = this) {
+  if (self.KeyValueMap && self.PropertyManager && self.Utils && self.SpreadsheetDataProvider) return self;
+  self.KeyValueMap = KeyValueMap;
+  self.PropertyManager = PropertyManager;
+  self.Utils = Utils;
+  self.SpreadsheetDataProvider = SpreadsheetDataProvider;
+  return self;
+}
